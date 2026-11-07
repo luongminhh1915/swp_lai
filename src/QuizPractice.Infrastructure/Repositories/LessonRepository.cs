@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using QuizPractice.Domain.Constants;
 using QuizPractice.Domain.Entities;
+using QuizPractice.Domain.Enums;
 using QuizPractice.Domain.Repositories;
 using QuizPractice.Infrastructure.Persistence;
 
@@ -15,12 +16,25 @@ public class LessonRepository(AppDbContext db) : ILessonRepository
             .OrderBy(l => l.DisplayOrder).ThenBy(l => l.Id)
             .ToListAsync(ct);
 
+    public async Task<IReadOnlyList<Lesson>> ListForLearnerAsync(int subjectId, CancellationToken ct = default) =>
+        await db.Lessons.AsNoTracking()
+            .Include(l => l.Type)
+            .Include(l => l.Quiz).ThenInclude(q => q!.Type)
+            .Include(l => l.Quiz).ThenInclude(q => q!.Questions)
+            .AsSplitQuery()
+            .Where(l => l.SubjectId == subjectId && l.Status == ActiveStatus.Active)
+            .OrderBy(l => l.DisplayOrder).ThenBy(l => l.Id)
+            .ToListAsync(ct);
+
     public Task<Lesson?> GetByIdAsync(int id, CancellationToken ct = default) =>
         db.Lessons
             .Include(l => l.Type)
             .Include(l => l.Topic)
             .Include(l => l.Quiz)
             .FirstOrDefaultAsync(l => l.Id == id, ct);
+
+    public Task<bool> NameExistsAsync(int subjectId, int? topicId, string name, int? exceptId, CancellationToken ct = default) =>
+        db.Lessons.AnyAsync(l => l.SubjectId == subjectId && l.TopicId == topicId && l.Name == name && l.Id != exceptId, ct);
 
     public Task<bool> HasLessonsUnderAsync(int topicId, CancellationToken ct = default) =>
         db.Lessons.AnyAsync(l => l.TopicId == topicId, ct);
