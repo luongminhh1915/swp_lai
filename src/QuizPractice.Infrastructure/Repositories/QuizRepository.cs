@@ -36,6 +36,14 @@ public class QuizRepository(AppDbContext db) : IQuizRepository
             .OrderBy(d => d.Type.DisplayOrder).ThenBy(d => d.Name).ThenBy(d => d.Id)
             .ToListAsync(ct);
 
+    public async Task<IReadOnlyList<FixedQuestion>> ListFixedQuestionsAsync(int quizId, CancellationToken ct = default) =>
+        await db.QuizQuestions.AsNoTracking()
+            .Where(z => z.QuizId == quizId)
+            .OrderBy(z => z.DisplayOrder)
+            .Select(z => new FixedQuestion(z.DisplayOrder, z.QuestionId, z.Question.Content,
+                z.Question.Lesson == null ? null : z.Question.Lesson.Name, z.Question.Level.Value, z.Question.Status))
+            .ToListAsync(ct);
+
     public async Task<IReadOnlyList<GroupMember>> GetTopicMembersAsync(int subjectId, CancellationToken ct = default) =>
         await db.Questions.AsNoTracking()
             .Where(q => q.SubjectId == subjectId && q.Status == VisibilityStatus.Shown && q.LessonId != null)
@@ -154,6 +162,9 @@ public class QuizRepository(AppDbContext db) : IQuizRepository
             .ToListAsync(ct);
         return new Page<Quiz>(items, total, page.PageNumber, page.PageSize);
     }
+
+    public Task<bool> NameExistsAsync(int subjectId, string name, int? exceptId, CancellationToken ct = default) =>
+        db.Quizzes.AnyAsync(q => q.SubjectId == subjectId && q.Name == name && q.Id != exceptId, ct);
 
     public async Task<IReadOnlyList<Setting>> GetTypesAsync(CancellationToken ct = default) =>
         await db.Settings.AsNoTracking()
