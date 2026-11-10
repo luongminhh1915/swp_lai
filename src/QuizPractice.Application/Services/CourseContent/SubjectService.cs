@@ -106,6 +106,11 @@ public class SubjectService(
             return invalid;
         }
 
+        if (await CheckNameAsync(request.Name, exceptId: null, ct) is { } nameTaken)
+        {
+            return nameTaken;
+        }
+
         var category = await CheckCategoryAsync(request.CategoryId, keptCategoryId: null, ct);
         if (category.Error is { } badCategory)
         {
@@ -139,7 +144,7 @@ public class SubjectService(
             Thumbnail = await files.SaveAsync(request.Thumbnail!.Content, request.Thumbnail.Extension, ThumbnailFolder, ct),
         };
         subjects.Add(subject);
-        await unitOfWork.SaveChangesAsync(ct);
+        await StoredFile.CommitAsync(() => unitOfWork.SaveChangesAsync(ct), subject.Thumbnail, files.Delete);
         return SubjectDto.From(subject, hasActivePackage: false);
     }
 
@@ -165,6 +170,11 @@ public class SubjectService(
         if (await updateValidator.CheckAsync(request, ct) is { } invalid)
         {
             return invalid;
+        }
+
+        if (await CheckNameAsync(request.Name, exceptId: id, ct) is { } nameTaken)
+        {
+            return nameTaken;
         }
 
         var category = await CheckCategoryAsync(request.CategoryId, keptCategoryId: subject.CategoryId, ct);
@@ -231,7 +241,8 @@ public class SubjectService(
         subject.PassRate = (byte)request.PassRate;
         subject.Description = description;
         subject.UpdatedAt = DateTime.UtcNow;
-        await unitOfWork.SaveChangesAsync(ct);
+        await StoredFile.CommitAsync(() => unitOfWork.SaveChangesAsync(ct),
+            request.Thumbnail is null ? null : subject.Thumbnail, files.Delete);
 
         // Only after the commit: if it had failed, the row would still point at the old file.
         if (replacedThumbnail is not null)
@@ -241,6 +252,12 @@ public class SubjectService(
 
         return SubjectDto.From(subject, await subjects.HasActivePackageAsync(id, ct));
     }
+
+    /// <summary>Two subjects with one name could not be told apart in the catalog, the registrations or the reports.</summary>
+    private async Task<Error?> CheckNameAsync(string name, int? exceptId, CancellationToken ct) =>
+        await subjects.NameExistsAsync(name.Trim(), exceptId, ct)
+            ? Error.Invalid(nameof(CreateSubjectRequest.Name), $"A subject named \"{name.Trim()}\" already exists.")
+            : null;
 
     /// <summary>An active Subject Category; on edit the stored one is kept even if switched off since (BR-16).</summary>
     private async Task<Result<Setting>> CheckCategoryAsync(int categoryId, int? keptCategoryId, CancellationToken ct)

@@ -77,7 +77,7 @@ public class QuizService(
         var types = await quizzes.GetTypesAsync(ct);
         return new QuizChoicesDto(
             subjects.Select(s => new QuizSubjectDto(s.Id, s.Name, s.PassRate)).ToList(),
-            levels.Where(l => l.Status == ActiveStatus.Active).Select(l => new QuestionLookupDto(l.Id, l.Value)).ToList(),
+            levels.Select(LevelDto.From).ToList(),
             types.Where(t => t.Status == ActiveStatus.Active).Select(t => new QuestionLookupDto(t.Id, t.Value)).ToList());
     }
 
@@ -116,7 +116,7 @@ public class QuizService(
             return invalid;
         }
 
-        var (type, badOverview) = await CheckOverviewAsync(request, expertId, keptLevelId: null, keptTypeId: null, ct);
+        var (type, badOverview) = await CheckOverviewAsync(request, expertId, exceptId: null, keptLevelId: null, keptTypeId: null, ct);
         if (badOverview is not null)
         {
             return badOverview;
@@ -195,7 +195,7 @@ public class QuizService(
             return Taken(quiz);
         }
 
-        var (type, badOverview) = await CheckOverviewAsync(request, expertId, quiz.LevelId, quiz.TypeId, ct);
+        var (type, badOverview) = await CheckOverviewAsync(request, expertId, exceptId: id, quiz.LevelId, quiz.TypeId, ct);
         if (badOverview is not null)
         {
             return badOverview;
@@ -362,9 +362,12 @@ public class QuizService(
                 groups?.Available(r.GroupId) ?? 0))
             .OrderBy(r => groups?.Order(r.GroupId) ?? r.GroupId)
             .ToList();
+        var fixedSet = quiz.Questions.Count == 0
+            ? []
+            : (await quizzes.ListFixedQuestionsAsync(quiz.Id, ct)).Select(FixedQuestionDto.From).ToList();
         return new QuizDto(quiz.Id, quiz.Name, quiz.SubjectId, quiz.Subject.Name, quiz.LevelId, quiz.TypeId, quiz.Type.Value,
             quiz.DurationMin, quiz.PassRate, quiz.Status, quiz.Description, quiz.QuestionCount, quiz.SelectionType, rules,
-            quiz.Questions.Count, await IsTakenAsync(quiz.Id, ct));
+            quiz.Questions.Count, await IsTakenAsync(quiz.Id, ct), fixedSet);
     }
 
     private async Task<bool> IsTakenAsync(int id, CancellationToken ct) => (await quizzes.GetTakenAsync([id], ct)).Count > 0;
@@ -380,11 +383,17 @@ public class QuizService(
     /// Type; one no longer in use stays only on the quiz that already has it.
     /// </summary>
     private async Task<(Setting? Type, Error? Error)> CheckOverviewAsync(
-        SaveQuizRequest request, int? expertId, int? keptLevelId, int? keptTypeId, CancellationToken ct)
+        SaveQuizRequest request, int? expertId, int? exceptId, int? keptLevelId, int? keptTypeId, CancellationToken ct)
     {
         if ((await quizzes.GetSubjectsAsync(expertId, ct)).All(s => s.Id != request.SubjectId))
         {
             return (null, expertId is null ? Error.Invalid(nameof(request.SubjectId), "This subject does not exist.") : ContentAccess.NotAssigned);
+        }
+
+        // Quizzes List and the lesson that points at a quiz show only its name.
+        if (await quizzes.NameExistsAsync(request.SubjectId, request.Name.Trim(), exceptId, ct))
+        {
+            return (null, Error.Invalid(nameof(request.Name), $"The subject already has a quiz named \"{request.Name.Trim()}\"."));
         }
 
         var level = (await quizzes.GetLevelsAsync(ct)).FirstOrDefault(l => l.Id == request.LevelId);

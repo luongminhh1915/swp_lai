@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Button, Flex, Form, Input, InputNumber, Radio, Result, Select, Space, Spin, Tabs, Typography } from 'antd'
+import { Alert, App, Button, Flex, Form, Input, InputNumber, Radio, Result, Select, Space, Spin, Table, Tabs, Typography } from 'antd'
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
-import { useLocation, useNavigate, useParams } from 'react-router'
-import type { QuizInput } from '../../api/quizzesApi'
+import { Link, useLocation, useNavigate, useParams } from 'react-router'
+import type { FixedQuestion, QuizInput } from '../../api/quizzesApi'
 import { applyFieldErrors, errorMessage, problemOf } from '../../api/client'
 import { PageHeader } from '../../components/PageHeader'
+import { StatusTag } from '../../components/StatusTag'
 import { LONG_TEXT_MAX, NAME_MAX } from '../../constants/fieldLength'
 import { useChangeQuizStatus, useQuiz, useQuizChoices, useQuizGroups, useSaveQuiz } from '../../hooks/useQuizzes'
+import { levelOptions } from '../../utils/levelOptions'
 
 type RuleRow = { groupId?: number; questionCount?: number }
 type FormValues = Omit<QuizInput, 'rules'> & { rules: RuleRow[] }
@@ -167,7 +169,7 @@ export function QuizDetailsPage() {
           />
         </Form.Item>
         <Form.Item label="Level" name="levelId" rules={[{ required: true, message: 'Choose a level.' }]} style={{ width: 160 }}>
-          <Select placeholder="Level" options={(choices.data?.levels ?? []).map((l) => ({ value: l.id, label: l.name }))} />
+          <Select placeholder="Level" options={levelOptions(choices.data?.levels ?? [], stored.data?.levelId)} />
         </Form.Item>
         <Form.Item label="Duration (min)" name="durationMin" rules={[{ required: true, message: 'Enter the duration.' }]}>
           <InputNumber min={1} max={180} precision={0} style={{ width: 130 }} />
@@ -285,6 +287,41 @@ export function QuizDetailsPage() {
     </>
   )
 
+  // A lesson quiz keeps the set drawn at its last save (D13): read only here, it changes only
+  // when the Setting tab changes. A simulation exam has no set: it draws one per attempt.
+  const fixedSet = stored.data?.fixedQuestions ?? []
+  const questions = (
+    <>
+      <Typography.Paragraph type="secondary">
+        Drawn when the quiz was last saved. Customers get these questions in this order; the set is drawn
+        again only when the subject, the way of drawing, the number of questions or the groups change.
+      </Typography.Paragraph>
+      <Table<FixedQuestion>
+        rowKey="id"
+        size="small"
+        pagination={false}
+        dataSource={fixedSet}
+        columns={[
+          { title: '#', dataIndex: 'order', width: 48 },
+          {
+            title: 'ID',
+            dataIndex: 'id',
+            width: 70,
+            render: (qid: number) => (
+              <Link to={`/manage/questions/${qid}`} state={{ back: location.pathname }}>
+                {qid}
+              </Link>
+            ),
+          },
+          { title: 'Content', dataIndex: 'content', ellipsis: true },
+          { title: 'Lesson', dataIndex: 'lesson', width: 200, ellipsis: true, render: (l: string | null) => l ?? '-' },
+          { title: 'Level', dataIndex: 'level', width: 90 },
+          { title: 'Status', dataIndex: 'status', width: 90, render: (s: string) => <StatusTag status={s} /> },
+        ]}
+      />
+    </>
+  )
+
   return (
     <>
       <PageHeader title={isNew ? 'New Quiz' : `Quiz Details #${id}`} />
@@ -315,6 +352,9 @@ export function QuizDetailsPage() {
           items={[
             { key: 'overview', label: 'Overview', children: overview, forceRender: true },
             { key: 'setting', label: 'Setting', children: setting, forceRender: true },
+            ...(fixedSet.length > 0
+              ? [{ key: 'questions', label: `Questions (${fixedSet.length})`, children: questions }]
+              : []),
           ]}
         />
         <Space style={{ marginTop: 8 }}>
